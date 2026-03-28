@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'home_page.dart';
+import 'localization/app_localizations.dart';
+import 'admins.dart'; // Added import for MyAdmins
 
 class LoginApp extends StatefulWidget {
   @override
@@ -11,12 +13,13 @@ class LoginApp extends StatefulWidget {
 
 class _LoginAppState extends State<LoginApp> {
   bool isLoading = false;
+  final GoogleSignIn _googleSignIn = GoogleSignIn();
 
   Future<void> signInWithGoogle() async {
     setState(() => isLoading = true); // Show loading
 
     try {
-      final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
+      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) {
         setState(() => isLoading = false);
         return;
@@ -24,8 +27,9 @@ class _LoginAppState extends State<LoginApp> {
 
       final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
       final OAuthCredential credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
+        // accessToken is optional and may not be available in new API
+        accessToken: googleAuth.accessToken,
       );
 
       UserCredential userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
@@ -59,6 +63,7 @@ class _LoginAppState extends State<LoginApp> {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
     return Scaffold(
       body: Stack(
         children: [
@@ -108,20 +113,21 @@ class _LoginAppState extends State<LoginApp> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       // App Logo
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(100),
-                        child: Image.network(
-                          'https://img.myloview.cz/plakaty/mother-earth-day-and-world-environment-day-concept-with-hand-holding-earth-planet-700-198028430.jpg',
-                          height: 80,
-                          width: 80,
-                          fit: BoxFit.cover,
+                      CircleAvatar(
+                        radius: 50,
+                        backgroundColor: Colors.white,
+                        backgroundImage: AssetImage('lib/assets/earth.jpg'),
+                        onBackgroundImageError: (_, __) => const Icon(
+                          Icons.image,
+                          size: 50,
+                          color: Colors.grey,
                         ),
                       ),
                       SizedBox(height: 20),
 
                       // Welcome Text
                       Text(
-                        "Welcome to Evergreen 🌿",
+                        l.welcome,
                         style: TextStyle(
                           fontSize: 24,
                           fontWeight: FontWeight.bold,
@@ -133,7 +139,7 @@ class _LoginAppState extends State<LoginApp> {
 
                       // Subtext
                       Text(
-                        "Join us in making the world a greener place!",
+                        l.joinUs,
                         style: TextStyle(color: Colors.white70, fontSize: 16),
                         textAlign: TextAlign.center,
                       ),
@@ -144,14 +150,35 @@ class _LoginAppState extends State<LoginApp> {
                       ElevatedButton.icon(
                         onPressed: isLoading ? null : signInWithGoogle,
                         icon: Image.network(
-                          'https://upload.wikimedia.org/wikipedia/commons/thumb/5/53/Google_%22G%22_Logo.svg/512px-Google_%22G%22_Logo.svg.png',
+                          'https://lh3.googleusercontent.com/COxitqgJr1sJnIDe8-jiKhxDx1FrYbtRHKJ9z_hELisAlapwE9LUPh6fcXIfb5vwpbMl4xl9H9TRFPc5NOO8Sb3VSgIBrfRYvW6cUA',
                           height: 24,
                           width: 24,
                         ),
                         label: isLoading
                             ? CircularProgressIndicator(color: Colors.black)
-                            : Text(
-                          'Login with Google',
+                          : Text(
+                          l.loginWithGoogle,
+                          style: TextStyle(color: Colors.black, fontSize: 16),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          elevation: 5,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      // Admin Login Button
+                      ElevatedButton.icon(
+                        onPressed: isLoading ? null : () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (context) => MyAdmins()),
+                          );
+                        },
+                        icon: Icon(Icons.admin_panel_settings, color: Colors.black, size: 24),
+                        label: Text(
+                          'Login as Admin',
                           style: TextStyle(color: Colors.black, fontSize: 16),
                         ),
                         style: ElevatedButton.styleFrom(

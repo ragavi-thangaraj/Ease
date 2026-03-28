@@ -5,129 +5,164 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'image_result_page.dart';
+
 class WellnessPage extends StatefulWidget {
   @override
   _WellnessPageState createState() => _WellnessPageState();
 }
+
 class _WellnessPageState extends State<WellnessPage> {
   File? _selectedImage;
   String? _imageDescription;
   bool _isLoading = false;
+
   Future<void> _pickImage() async {
-    final pickedFile = await ImagePicker().pickImage(source: ImageSource.gallery);
+    final ImagePicker picker = ImagePicker();
+
+    // Show a dialog to let the user choose
+    final ImageSource? source = await showDialog<ImageSource>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20.0),
+          ),
+          backgroundColor: Colors.green[50],
+          title: Text(
+            "Choose Image Source",
+            style: TextStyle(
+              fontFamily: 'Roboto',
+              fontWeight: FontWeight.bold,
+              fontSize: 20,
+              color: Colors.green[800],
+            ),
+          ),
+          content: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Colors.green.shade200, Colors.green.shade100],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(15.0),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: Icon(Icons.camera_alt, color: Colors.green[700]),
+                  title: Text(
+                    "Camera",
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.green[900],
+                    ),
+                  ),
+                  onTap: () => Navigator.pop(context, ImageSource.camera),
+                  hoverColor: Colors.green[300],
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10.0),
+                  ),
+                ),
+                Divider(color: Colors.green[300], thickness: 1),
+                ListTile(
+                  leading: Icon(Icons.photo_library, color: Colors.green[700]),
+                  title: Text(
+                    "Gallery",
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.green[900],
+                    ),
+                  ),
+                  onTap: () => Navigator.pop(context, ImageSource.gallery),
+                  hoverColor: Colors.green[300],
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10.0),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (source == null) return; // If user cancels the dialog
+
+    final pickedFile = await picker.pickImage(source: source);
     if (pickedFile != null) {
       setState(() {
         _selectedImage = File(pickedFile.path);
         _imageDescription = null;
-        _isLoading = true;
-      });
-      await _fetchImageDescription(_selectedImage!);
-    }
-  }
-  Future<String?> _fetchAPIKey() async {
-    try {
-      DocumentSnapshot<Map<String, dynamic>> doc = await FirebaseFirestore.instance
-          .collection("company") // Adjust if needed
-          .doc("G1HhRecZtrfP72rxEdTI")
-          .get();
-
-      if (doc.exists && doc.data() != null && doc.data()!.containsKey("api")) {
-        List<dynamic> apiKeys = doc.data()!["api"];
-
-        if (apiKeys.isEmpty) {
-          print("No API keys available in Firestore.");
-          return null;
-        }
-
-        for (String key in apiKeys) {
-          bool success = await _testAPIKey(key);
-          if (success) return key; // ✅ Use the first successful API key
-        }
-      } else {
-        print("API Key array not found in Firestore!");
-      }
-    } catch (e) {
-      print("Error fetching API Key: $e");
-    }
-    return null; // Return null if all keys fail
-  }
-  Future<bool> _testAPIKey(String apiKey) async {
-    try {
-      var url = Uri.parse("https://label-image.p.rapidapi.com/detect-label");
-      var response = await http.post(url, headers: {
-        "X-RapidAPI-Key": apiKey,
-        "Content-Type": "application/json"
+        _isLoading = true; // Set loading state
       });
 
-      if (response.statusCode == 200) {
-        return true; // ✅ Key works, use it
-      }
-    } catch (e) {
-      print("Error testing API Key: $e");
+      // Wait for the frame to render the loading indicator
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        await _fetchImageDescription(_selectedImage!);
+      });
     }
-    return false; // ❌ Key failed, try next one
   }
 
   Future<void> _fetchImageDescription(File image) async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    String? apiKey = await _fetchAPIKey();
-
-    if (apiKey == null) {
-      setState(() {
-        _isLoading = false;
-      });
-      _showUserMessage("This may take a while. Please try again later.");
-      return;
-    }
-
-    var url = Uri.parse("https://label-image.p.rapidapi.com/detect-label");
-
+  setState(() => _isLoading = true);
+  try {
+    var url = Uri.parse("https://SanmathiSethu06-ObjectDetectionAPI.hf.space/detect");
     var request = http.MultipartRequest("POST", url)
-      ..headers["X-RapidAPI-Key"] = apiKey
       ..files.add(await http.MultipartFile.fromPath("image", image.path));
+    var response = await request.send();
+    var responseBody = await response.stream.bytesToString();
 
-    try {
-      var response = await request.send();
-      var responseBody = await response.stream.bytesToString();
+    if (response.statusCode == 200) {
+      var data = jsonDecode(responseBody);
+      final labelsRaw = data['labels'];
+      final countRaw = data['count'];
+      if (labelsRaw != null && labelsRaw is Map) {
+        final labelsMap = Map<String, dynamic>.from(labelsRaw);
 
-      if (response.statusCode == 200) {
-        print("API Response: $responseBody");
-        var data = jsonDecode(responseBody);
-        List<dynamic> labelsList = data["body"]["labels"];
-        List<String> extractedLabels =
-        labelsList.map((label) => label["description"].toString()).toList();
+        // ✅ Extract detected labels
+        final detectedLabels = labelsMap.keys.toList();
 
-        Map<String, dynamic> formattedApiResponse = {
-          "body": {
-            "labels": extractedLabels
-          }
+        // ✅ Build final map { "labels": ["Bottle", "Drink", "Food"] }
+        final descriptionMap = {
+          "labels": detectedLabels,
+          "count": countRaw,
         };
 
         setState(() {
           _isLoading = false;
+          _imageDescription = detectedLabels.isNotEmpty
+              ? detectedLabels.join(", ")
+              : "No objects detected.";
         });
 
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) =>
-                ImageResultPage(image: image, descriptionText: formattedApiResponse),
+            builder: (context) => ImageResultPage(
+              image: image,
+              descriptionText: descriptionMap, // 👈 Pass final map here
+            ),
           ),
         );
       } else {
-        throw Exception("API Request failed.");
+        setState(() {
+          _isLoading = false;
+          _imageDescription = "No objects detected.";
+        });
+        _showUserMessage("No labels found, cannot fetch data.");
       }
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      _showUserMessage("This may take a while. Please try again later.");
-      print("Error: $e");
+    } else {
+      setState(() => _isLoading = false);
+      _showUserMessage("API Request failed.");
     }
+  } catch (e) {
+    setState(() => _isLoading = false);
+    _showUserMessage("This may take a while. Please try again later.");
   }
+}
+
+
   void _showUserMessage(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -141,6 +176,7 @@ class _WellnessPageState extends State<WellnessPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // Keep the same functionality
       extendBodyBehindAppBar: true,
       appBar: AppBar(
         title: Row(
@@ -148,7 +184,8 @@ class _WellnessPageState extends State<WellnessPage> {
           children: [
             Icon(Icons.spa, color: Colors.white),
             SizedBox(width: 8),
-            Text("Wellness & Environment", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+            Text("Wellness & Environment",
+                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
           ],
         ),
         backgroundColor: Colors.green[900],
@@ -159,109 +196,153 @@ class _WellnessPageState extends State<WellnessPage> {
       ),
       body: Stack(
         children: [
-          // 🌿 Background Image with Blurred Overlay
+          // 1) Lightened background image from local asset
           Positioned.fill(
-            child: ShaderMask(
-              shaderCallback: (bounds) => LinearGradient(
-                colors: [Colors.black.withOpacity(0.2), Colors.transparent],
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-              ).createShader(bounds),
-              blendMode: BlendMode.darken,
-              child: Image.network(
-                'https://img.pikbest.com/wp/202405/eco-friendly-banner-with-sustainable-green-background-3d-render_9850513.jpg!sw800',
-                fit: BoxFit.cover,
+            child: Container(
+              decoration: BoxDecoration(
+                image: DecorationImage(
+                  image: AssetImage('lib/assets/ease.jpg'), // Replaced with local asset
+                  fit: BoxFit.cover,
+                  colorFilter: ColorFilter.mode(
+                    Colors.white.withOpacity(0.7),
+                    BlendMode.srcOver,
+                  ),
+                ),
               ),
             ),
           ),
+
+          // 2) Loading overlay if needed
           if (_isLoading)
             Positioned.fill(
               child: Container(
-                color: Colors.black.withOpacity(0.6),
+                color: Colors.black.withOpacity(0.5),
                 child: Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      CircularProgressIndicator(color: Colors.greenAccent),
+                      // Loading GIF
+                      Image.asset(
+                        'lib/assets/loading.gif',
+                        width: 120,
+                        height: 120,
+                      ),
                       SizedBox(height: 20),
-                      Text("Analyzing Image...",
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                      Text(
+                        "Analyzing Image...",
+                        style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white),
+                      ),
                     ],
                   ),
                 ),
               ),
             ),
 
-          // 🌿 Glassmorphism Effect UI
+          // 3) Main content (centered card)
           Center(
-            child: Container(
-              width: MediaQuery.of(context).size.width * 0.85,
-              padding: EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(25),
-                border: Border.all(color: Colors.white.withOpacity(0.3)),
-                boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 10)],
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text("Choose an Image", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
-                  SizedBox(height: 20),
-                  GestureDetector(
-                    onTap: _pickImage,
-                    child: Container(
-                      width: 220,
-                      height: 220,
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.white.withOpacity(0.6), width: 3),
-                        borderRadius: BorderRadius.circular(20),
-                        color: Colors.green[50]?.withOpacity(0.5),
-                        boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 10)],
-                      ),
-                      child: _selectedImage == null
-                          ? Icon(Icons.add_a_photo, size: 80, color: Colors.white)
-                          : ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
-                        child: Image.file(_selectedImage!, fit: BoxFit.cover),
+            child: SingleChildScrollView(
+              child: Container(
+                width: MediaQuery.of(context).size.width * 0.85,
+                padding: EdgeInsets.all(20),
+                margin: EdgeInsets.only(top: kToolbarHeight + 40),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.95),
+                  borderRadius: BorderRadius.circular(25),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black26,
+                      blurRadius: 10,
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Title
+                    Text(
+                      "Choose an Image",
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green[900],
                       ),
                     ),
-                  ),
-                  SizedBox(height: 20),
-                  ElevatedButton.icon(
-                    onPressed: _pickImage,
-                    icon: Icon(Icons.upload, color: Colors.white),
-                    label: Text("Select Image", style: TextStyle(color: Colors.white)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green[700],
-                      padding: EdgeInsets.symmetric(horizontal: 25, vertical: 14),
-                      textStyle: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                      elevation: 10,
-                    ),
-                  ),
-                  SizedBox(height: 20),
+                    SizedBox(height: 20),
 
-                  // 📜 Image Description after API Response
-                  if (_imageDescription != null)
-                    Padding(
-                      padding: EdgeInsets.all(10),
-                      child: Text(
-                        "🌱 Description: $_imageDescription",
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 16, fontStyle: FontStyle.italic, color: Colors.white),
+                    // Image Preview Container
+                    GestureDetector(
+                      onTap: _pickImage,
+                      child: Container(
+                        width: 220,
+                        height: 220,
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.green[900]!.withOpacity(0.5), width: 3),
+                          borderRadius: BorderRadius.circular(20),
+                          color: Colors.green[50],
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black12,
+                              blurRadius: 10,
+                              offset: Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: _selectedImage == null
+                            ? Icon(Icons.add_a_photo, size: 80, color: Colors.green[800])
+                            : ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: Image.file(_selectedImage!, fit: BoxFit.cover),
+                        ),
                       ),
                     ),
+                    SizedBox(height: 20),
 
-                  SizedBox(height: 10),
+                    // Button
+                    ElevatedButton.icon(
+                      onPressed: _pickImage,
+                      icon: Icon(Icons.upload, color: Colors.white),
+                      label: Text("Select Image", style: TextStyle(color: Colors.white)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green[700],
+                        padding: EdgeInsets.symmetric(horizontal: 25, vertical: 14),
+                        textStyle: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                        elevation: 6,
+                      ),
+                    ),
+                    SizedBox(height: 20),
 
-                  // 🌍 Motivational Quote
-                  Text(
-                    "“The earth does not belong to us: we belong to the earth.” 🌍",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 16, fontStyle: FontStyle.italic, color: Colors.white70),
-                  ),
-                ],
+                    // If there's an image description from the API
+                    if (_imageDescription != null)
+                      Padding(
+                        padding: EdgeInsets.all(10),
+                        child: Text(
+                          "🌱 Description: $_imageDescription",
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontStyle: FontStyle.italic,
+                            color: Colors.grey[800],
+                          ),
+                        ),
+                      ),
+
+                    // Motivational quote
+                    SizedBox(height: 10),
+                    Text(
+                      "“The earth does not belong to us: we belong to the earth.” 🌍",
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontStyle: FontStyle.italic,
+                        color: Colors.grey[700],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
